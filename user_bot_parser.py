@@ -1,64 +1,71 @@
 import os
 import re
 import time
+import json
 import random
 from pyrogram import Client
 from dotenv import load_dotenv
 
 # Загрузка переменных окружения
 load_dotenv()
-api_id = os.getenv('API_ID')
-api_hash = os.getenv('API_HASH')
+api_id = os.getenv("API_ID")
+api_hash = os.getenv("API_HASH")
 
 # Подключение к Telegram
 app = Client("my_account", api_id=api_id, api_hash=api_hash)
 
-# Регулярка для поиска контактов в описании канала
+# Регулярка для поиска username или ссылок на Telegram
 CONTACT_REGEX = re.compile(r'@[\w\d_]+|t\.me/[\w\d_]+|https://t\.me/[\w\d_]+', re.IGNORECASE)
 
-# Пример: username или ссылка канала
-channel_usernames = [
-    "Nargilya_Soul", "channel2", "channel3", "channel4", "channel5", 
-    "channel6", "channel7", "channel8", "channel9", "channel10", "channel11"
-]  # список каналов для проверки
+# Путь к папке с JSON-файлами
+EXPORT_PATH = "exported_data"
 
-# Функция для обработки канала с паузой в случае FLOOD_WAIT
-def parse_channel(channel_username, request_count):
+def extract_contacts(channel_username: str):
+    """Получение контактов из описания канала"""
     try:
         chat = app.get_chat(channel_username)
         description = chat.description or ""
         contacts = CONTACT_REGEX.findall(description)
-        
-        print(f"Название канала: {chat.title}")
-        print(f"Контакты, найденные в описании: {contacts if contacts else 'Контакты не найдены'}")
-        return contacts
+        print(f"📦 {channel_username} → Найдено контактов: {contacts}")
+        return ", ".join(contacts) if contacts else ""
     except Exception as e:
         if "FLOOD_WAIT" in str(e):
             wait_time = int(re.search(r'(\d+)', str(e)).group(1))
-            print(f"Необходимо подождать {wait_time} секунд...")
-            time.sleep(wait_time)  # Ждём, если произошла ошибка FLOOD_WAIT
-            return parse_channel(channel_username, request_count)  # Повторяем запрос
+            print(f"⏳ FLOOD_WAIT: ждём {wait_time} секунд...")
+            time.sleep(wait_time)
+            return extract_contacts(channel_username)
         else:
-            print(f"Ошибка при парсинге канала {channel_username}: {e}")
-            return None
+            print(f"❌ Ошибка при парсинге '{channel_username}': {e}")
+            return ""
 
-# Основная функция для обработки списка каналов с ограничением на 10 запросов
-def parse_channels():
-    request_count = 0  # Счётчик запросов
-    for channel_username in channel_usernames:
-        if request_count >= 10:  # Ограничиваем до 10 запросов
-            print("Достигнут лимит запросов (10). Завершаем выполнение.")
-            break
-        print(f"Обработка канала: {channel_username}")
-        with app:
-            parse_channel(channel_username, request_count)
-        
-        # Случайная пауза между запросами от 10 до 20 секунд
-        random_pause = random.randint(10, 20)
-        print(f"Пауза {random_pause} секунд перед следующим запросом...")
-        time.sleep(random_pause)
-        
-        request_count += 1
+def process_file(filepath):
+    """Обработка одного JSON-файла"""
+    print(f"\n📂 Обработка файла: {filepath}")
+    with open(filepath, "r", encoding="utf-8") as f:
+        data = json.load(f)
 
-# Запуск парсинга
-parse_channels()
+    for entry in data:
+        username = entry.get("Ник канала")
+        if username:
+            contacts = extract_contacts(username)
+            entry["Автор (ник ссылка)"] = contacts
+            pause = random.randint(10, 20)
+            print(f"🕒 Пауза {pause} секунд...\n")
+            time.sleep(pause)
+
+    # Перезапись файла
+    with open(filepath, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=4)
+
+def main():
+    app.start()
+    try:
+        files = [f for f in os.listdir(EXPORT_PATH) if f.endswith(".json")]
+        for file in files:
+            process_file(os.path.join(EXPORT_PATH, file))
+        print("\n✅ Завершено.")
+    finally:
+        app.stop()
+
+if __name__ == "__main__":
+    main()
